@@ -1,0 +1,82 @@
+Transform: 'AWS::Serverless-2016-10-31'
+
+Parameters:
+  Stage:
+    Description: "The stage to deploy."
+    Type: "String"
+    Default: "dev"
+
+Resources:
+
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Stage
+      DefinitionBody:
+        swagger: 2.0
+        info:
+          title:
+            Ref: AWS::StackName
+        schemes:
+          - "https"
+        paths:
+          "/example":
+            get:
+              x-amazon-apigateway-integration:
+                httpMethod: GET
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ExampleFunction}/invocations
+              responses: {}
+              security:
+              - basic-authorizer: []
+        securityDefinitions:
+          basic-authorizer:
+            type: "apiKey"
+            name: "Authorization"
+            in: "header"
+            x-amazon-apigateway-authtype: "custom"
+            x-amazon-apigateway-authorizer:
+              authorizerUri:
+                Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BasicAuthFunction}/invocations
+              authorizerResultTtlInSeconds: 0
+              identitySource: "method.request.header.Authorization"
+              type: "request"
+        x-amazon-apigateway-gateway-responses:
+          UNAUTHORIZED:
+            statusCode: 401
+            responseParameters:
+              gatewayresponse.header.WWW-Authenticate: "'Basic realm=\"Secure Area\"'"
+            responseTemplates:
+              application/json: "{\"message\":\"access denied\"}"
+
+  ConfigLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    DependsOn:
+      - BasicAuthFunction
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BasicAuthFunction
+      Principal: apigateway.amazonaws.com
+
+  BasicAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: authorizer.handler
+      CodeUri: ./
+      Runtime: nodejs6.10
+
+  ExampleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: example.handler
+      Runtime: nodejs10.6
+      CodeUri: ./
+      Events:
+        Get:
+          Type: Api
+          Properties:
+            Path: /example
+            Method: get
+            RestApiId:
+              Ref: Api
